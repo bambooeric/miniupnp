@@ -1,5 +1,19 @@
-$Id: Changelog.txt,v 1.237 2019/04/03 15:57:43 nanard Exp $
+$Id: Changelog.txt,v 1.242 2019/12/23 23:35:40 nanard Exp $
 miniUPnP client Changelog.
+
+2020/02/16:
+  Add Haiku support
+
+2019/10/22:
+  testminiwget.sh can use either "ip addr" or "ifconfig -a
+
+2019/10/13:
+  fix UPNP_GetValidIGD() when several devices are found
+  which are reachable from != local address
+
+2019/08/24:
+  Allow Remote Host on upnpc command line
+  fix error 708 description in strupnperror()
 
 2019/04/05:
   Fix memory leak in upnpreplyparse.c with NewPortListing element

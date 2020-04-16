@@ -1,8 +1,8 @@
-/* $Id: miniupnpd.c,v 1.232 2018/07/06 12:35:26 nanard Exp $ */
+/* $Id: miniupnpd.c,v 1.243 2020/04/12 17:43:13 nanard Exp $ */
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * MiniUPnP project
  * http://miniupnp.free.fr/ or http://miniupnp.tuxfamily.org/
- * (c) 2006-2019 Thomas Bernard
+ * (c) 2006-2020 Thomas Bernard
  * This software is subject to the conditions detailed
  * in the LICENCE file provided within the distribution */
 
@@ -48,6 +48,9 @@
 /* unix sockets */
 #ifdef USE_MINIUPNPDCTL
 #include <sys/un.h>
+#endif
+#ifdef ENABLE_HTTPS
+#include <openssl/crypto.h>
 #endif
 
 #ifdef TOMATO
@@ -1178,6 +1181,11 @@ init(int argc, char * * argv, struct runtime_vars * v)
 			case UPNPEXT_IFNAME:
 				ext_if_name = ary_options[i].value;
 				break;
+#ifdef ENABLE_IPV6
+			case UPNPEXT_IFNAME6:
+				ext_if_name6 = ary_options[i].value;
+				break;
+#endif
 			case UPNPEXT_IP:
 				use_ext_ip_addr = ary_options[i].value;
 				break;
@@ -1216,6 +1224,10 @@ init(int argc, char * * argv, struct runtime_vars * v)
 				{
 					fprintf(stderr, "can't parse \"%s\" as valid IPv6 listening address", ary_options[i].value);
 				}
+				break;
+			case UPNPIPV6_DISABLE:
+				if(strcmp(ary_options[i].value, "yes") == 0)
+					SETFLAG(IPV6DISABLEDMASK);
 				break;
 #endif /* ENABLE_IPV6 */
 			case UPNPPORT:
@@ -1262,6 +1274,17 @@ init(int argc, char * * argv, struct runtime_vars * v)
 				break;
 #endif	/* ENABLE_MANUFACTURER_INFO_CONFIGURATION */
 #ifdef USE_NETFILTER
+#ifdef USE_NFTABLES
+			case UPNPFORWARDCHAIN:
+				set_rdr_name(RDR_FORWARD_CHAIN_NAME, ary_options[i].value);
+				break;
+			case UPNPNATCHAIN:
+				set_rdr_name(RDR_NAT_PREROUTING_CHAIN_NAME, ary_options[i].value);
+				break;
+			case UPNPNATPOSTCHAIN:
+				set_rdr_name(RDR_NAT_POSTROUTING_CHAIN_NAME, ary_options[i].value);
+				break;
+#else
 			case UPNPFORWARDCHAIN:
 				miniupnpd_forward_chain = ary_options[i].value;
 				break;
@@ -1271,7 +1294,8 @@ init(int argc, char * * argv, struct runtime_vars * v)
 			case UPNPNATPOSTCHAIN:
 				miniupnpd_nat_postrouting_chain = ary_options[i].value;
 				break;
-#endif	/* USE_NETFILTER */
+#endif    /* else USE_NFTABLES */
+#endif    /* USE_NETFILTER */
 			case UPNPNOTIFY_INTERVAL:
 				v->notify_interval = atoi(ary_options[i].value);
 				break;
@@ -1403,6 +1427,11 @@ init(int argc, char * * argv, struct runtime_vars * v)
 		}
 		else switch(argv[i][1])
 		{
+#ifdef ENABLE_IPV6
+		case '4':
+			SETFLAG(IPV6DISABLEDMASK);
+			break;
+#endif
 #ifdef IGD_V2
 		case '1':
 			SETFLAG(FORCEIGDDESCV1MASK);
@@ -1501,6 +1530,14 @@ init(int argc, char * * argv, struct runtime_vars * v)
 			else
 				fprintf(stderr, "Option -%c takes one argument.\n", argv[i][1]);
 			break;
+#ifdef ENABLE_IPV6
+		case 'I':
+			if(i+1 < argc)
+				ext_if_name6 = argv[++i];
+			else
+				fprintf(stderr, "Option -%c takes one argument.\n", argv[i][1]);
+			break;
+#endif
 #ifdef USE_PF
 		case 'q':
 			if(i+1 < argc)
@@ -1672,11 +1709,16 @@ init(int argc, char * * argv, struct runtime_vars * v)
 			fprintf(stderr, "Unknown option: %s\n", argv[i]);
 		}
 	}
-	if(!ext_if_name || !lan_addrs.lh_first)
-	{
+	if(!ext_if_name || !lan_addrs.lh_first) {
 		/* bad configuration */
 		goto print_usage;
 	}
+
+	/* IPv6 ifname is defaulted to same as IPv4 */
+#ifdef ENABLE_IPV6
+	if(!ext_if_name6)
+		ext_if_name6 = ext_if_name;
+#endif
 
 	if (use_ext_ip_addr && GETFLAG(PERFORMSTUNMASK)) {
 		fprintf(stderr, "Error: options ext_ip= and ext_perform_stun=yes cannot be specified together\n");
@@ -1821,11 +1863,16 @@ init(int argc, char * * argv, struct runtime_vars * v)
 	return 0;
 print_usage:
 	fprintf(stderr, "Usage:\n\t"
+	        "%s --version\n\t"
 	        "%s "
 #ifndef DISABLE_CONFIG_FILE
 			"[-f config_file] "
 #endif
-			"[-i ext_ifname] [-o ext_ip]\n"
+			"[-i ext_ifname] "
+#ifdef ENABLE_IPV6
+			"[-I ext_ifname6] [-4] "
+#endif
+			"[-o ext_ip]\n"
 #ifndef MULTIPLE_EXTERNAL_IP
 			"\t\t[-a listening_ip]"
 #else
@@ -1867,6 +1914,9 @@ print_usage:
 			"\tDefault config file is '%s'.\n"
 			"\tWith -d miniupnpd will run as a standard program.\n"
 			"\t-o argument is either an IPv4 address or \"STUN:host[:port]\".\n"
+#ifdef ENABLE_IPV6
+			"\t-4 disable IPv6\n"
+#endif
 #if defined(USE_PF) || defined(USE_IPF)
 			"\t-L sets packet log in pf and ipf on.\n"
 #endif
@@ -1896,7 +1946,7 @@ print_usage:
 			"\t-1 force reporting IGDv1 in rootDesc *use with care*\n"
 #endif
 			"\t-h prints this help and quits.\n"
-	        "", argv[0], pidfilename, DEFAULT_CONFIG);
+	        "", argv[0], argv[0], pidfilename, DEFAULT_CONFIG);
 	return 1;
 }
 
@@ -1957,6 +2007,38 @@ main(int argc, char * * argv)
 	unsigned int next_pinhole_ts;
 #endif
 
+	for(i = 0; i < argc; i++) {
+		if(strcmp(argv[i], "version") == 0 || strcmp(argv[i], "--version") == 0) {
+			puts("miniupnpd " MINIUPNPD_VERSION
+#ifdef MINIUPNPD_GIT_REF
+			     " " MINIUPNPD_GIT_REF
+#endif
+			     " " __DATE__ );
+#ifdef USE_PF
+			puts("using pf backend");
+#endif
+#ifdef USE_IPF
+			puts("using ipf backend");
+#endif
+#ifdef USE_IPFW
+			puts("using ipfw backend");
+#endif
+#ifdef USE_IPTABLES
+			puts("using netfilter(iptables) backend");
+#endif
+#ifdef USE_NFTABLES
+			puts("using netfilter(nftables) backend");
+#endif
+#ifdef ENABLE_HTTPS
+#ifdef OPENSSL_VERSION
+			puts(OpenSSL_version(OPENSSL_VERSION));
+#else
+			puts(SSLeay_version(SSLEAY_VERSION));
+#endif
+#endif
+			return 0;
+		}
+	}
 	if(init(argc, argv, &v) != 0)
 		return 1;
 #ifdef ENABLE_HTTPS
@@ -2011,6 +2093,11 @@ main(int argc, char * * argv)
 #endif
 	       GETFLAG(ENABLEUPNPMASK) ? "UPnP-IGD " : "",
 	       ext_if_name, upnp_bootid);
+#ifdef ENABLE_IPV6
+	if (ext_if_name6 != ext_if_name) {
+		syslog(LOG_INFO, "specific IPv6 ext if %s", ext_if_name6);
+	}
+#endif
 
 	if(GETFLAG(PERFORMSTUNMASK))
 	{
@@ -2028,6 +2115,7 @@ main(int argc, char * * argv)
 		} else if (addr_is_reserved(&addr)) {
 			syslog(LOG_INFO, "Reserved / private IP address %s on ext interface %s: Port forwarding is impossible", if_addr, ext_if_name);
 			syslog(LOG_INFO, "You are probably behind NAT, enable option ext_perform_stun=yes to detect public IP address");
+			syslog(LOG_INFO, "Or use ext_ip= / -o option to declare public IP address");
 			disable_port_forwarding = 1;
 		}
 	}
@@ -2038,7 +2126,7 @@ main(int argc, char * * argv)
 		listen_port = (v.port > 0) ? v.port : 0;
 		/* open socket for HTTP connections. Listen on the 1st LAN address */
 #ifdef ENABLE_IPV6
-		shttpl = OpenAndConfHTTPSocket(&listen_port, 1);
+		shttpl = OpenAndConfHTTPSocket(&listen_port, !GETFLAG(IPV6DISABLEDMASK));
 #else /* ENABLE_IPV6 */
 		shttpl = OpenAndConfHTTPSocket(&listen_port);
 #endif /* ENABLE_IPV6 */
@@ -2064,7 +2152,7 @@ main(int argc, char * * argv)
 		/* https */
 		listen_port = (v.https_port > 0) ? v.https_port : 0;
 #ifdef ENABLE_IPV6
-		shttpsl = OpenAndConfHTTPSocket(&listen_port, 1);
+		shttpsl = OpenAndConfHTTPSocket(&listen_port, !GETFLAG(IPV6DISABLEDMASK));
 #else /* ENABLE_IPV6 */
 		shttpsl = OpenAndConfHTTPSocket(&listen_port);
 #endif /* ENABLE_IPV6 */
@@ -2201,6 +2289,15 @@ main(int argc, char * * argv)
 #endif
 	}
 #endif
+
+	/* drop privileges */
+#ifdef HAS_PLEDGE
+	/* mcast ? unix ? */
+	if (pledge("stdio inet pf", NULL) < 0) {
+		syslog(LOG_ERR, "pledge(): %m");
+		return 1;
+	}
+#endif /* HAS_PLEDGE */
 
 	/* main loop */
 	while(!quitting)
@@ -2873,6 +2970,8 @@ shutdown:
 #ifndef DISABLE_CONFIG_FILE
 	freeoptions();
 #endif
+
+	shutdown_redirect();
 
 	return 0;
 }
