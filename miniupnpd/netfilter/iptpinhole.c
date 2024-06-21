@@ -1,7 +1,7 @@
-/* $Id: iptpinhole.c,v 1.20 2019/08/24 07:18:23 nanard Exp $ */
+/* $Id: iptpinhole.c,v 1.21 2020/05/10 17:49:33 nanard Exp $ */
 /* MiniUPnP project
  * http://miniupnp.free.fr/ or https://miniupnp.tuxfamily.org/
- * (c) 2012-2019 Thomas Bernard
+ * (c) 2012-2020 Thomas Bernard
  * This software is subject to the conditions detailed
  * in the LICENCE file provided within the distribution */
 
@@ -12,7 +12,7 @@
 #include <arpa/inet.h>
 #include <sys/queue.h>
 
-#include "../config.h"
+#include "config.h"
 #include "../macros.h"
 #include "iptpinhole.h"
 #include "../upnpglobalvars.h"
@@ -27,6 +27,8 @@
 #define IP6TC_HANDLE struct ip6tc_handle *
 
 static int next_uid = 1;
+
+static const char * miniupnpd_v6_filter_chain = "MINIUPNPD";
 
 static LIST_HEAD(pinhole_list_t, pinhole_t) pinhole_list;
 
@@ -227,11 +229,17 @@ int add_pinhole(const char * ifname,
 	if(ifname)
 		strncpy(e->ipv6.iniface, ifname, IFNAMSIZ);
 	if(rem_host && (rem_host[0] != '\0')) {
-		inet_pton(AF_INET6, rem_host, &e->ipv6.src);
-		memset(&e->ipv6.smsk, 0xff, sizeof(e->ipv6.smsk));
+		if(inet_pton(AF_INET6, rem_host, &e->ipv6.src) < 1) {
+			syslog(LOG_WARNING, "failed to parse INET6 address \"%s\"", rem_host);
+		} else {
+			memset(&e->ipv6.smsk, 0xff, sizeof(e->ipv6.smsk));
+		}
 	}
-	inet_pton(AF_INET6, int_client, &e->ipv6.dst);
-	memset(&e->ipv6.dmsk, 0xff, sizeof(e->ipv6.dmsk));
+	if (inet_pton(AF_INET6, int_client, &e->ipv6.dst) < 1) {
+		syslog(LOG_WARNING, "failed to parse INET6 address \"%s\"", int_client);
+	} else {
+		memset(&e->ipv6.dmsk, 0xff, sizeof(e->ipv6.dmsk));
+	}
 
 	/*e->nfcache = NFC_IP_DST_PT;*/
 	/*e->nfcache |= NFC_UNKNOWN;*/
@@ -284,11 +292,17 @@ find_pinhole(const char * ifname,
 	UNUSED(ifname);
 
 	if(rem_host && (rem_host[0] != '\0')) {
-		inet_pton(AF_INET6, rem_host, &saddr);
+		if (inet_pton(AF_INET6, rem_host, &saddr) < 1) {
+			syslog(LOG_WARNING, "Failed to parse INET6 address \"%s\"", rem_host);
+			memset(&saddr, 0, sizeof(struct in6_addr));
+		}
 	} else {
 		memset(&saddr, 0, sizeof(struct in6_addr));
 	}
-	inet_pton(AF_INET6, int_client, &daddr);
+	if (inet_pton(AF_INET6, int_client, &daddr) < 1) {
+		syslog(LOG_WARNING, "Failed to parse INET6 address \"%s\"", int_client);
+		memset(&daddr, 0, sizeof(struct in6_addr));
+	}
 	for(p = pinhole_list.lh_first; p != NULL; p = p->entries.le_next) {
 		if((proto == p->proto) && (rem_port == p->sport) &&
 		   (0 == memcmp(&saddr, &p->saddr, sizeof(struct in6_addr))) &&

@@ -1,7 +1,7 @@
 /* $Id: testnftnlrdr.c,v 1.2 2019/06/30 19:49:18 nanard Exp $ */
 /* MiniUPnP project
- * http://miniupnp.free.fr/ or http://miniupnp.tuxfamily.org/
- * (c) 2006-2019 Thomas Bernard
+ * http://miniupnp.free.fr/ or https://miniupnp.tuxfamily.org/
+ * (c) 2006-2023 Thomas Bernard
  * This software is subject to the conditions detailed
  * in the LICENCE file provided within the distribution */
 
@@ -9,6 +9,14 @@
 #include <stdlib.h>
 #include <netinet/in.h>
 #include <syslog.h>
+/* for PRIu64 */
+#include <inttypes.h>
+
+#include <linux/netfilter/nf_tables.h>
+#include <libnftnl/table.h>
+#include <libnftnl/chain.h>
+#include <libnftnl/rule.h>
+#include <libnftnl/expr.h>
 
 #include "nftnlrdr.h"
 #include "nftnlrdr_misc.h"
@@ -22,7 +30,7 @@ static int
 add_filter_rule(int proto, const char * rhost,
 		const char * iaddr, unsigned short iport)
 {
-	return add_filter_rule2(NULL, rhost, iaddr, 0, iport, proto, NULL);
+	return add_filter_rule2(NULL/* ifname */, rhost, iaddr, 0/* eport */, iport, proto, NULL/* desc */);
 }
 
 static int
@@ -30,7 +38,7 @@ addnatrule(int proto, unsigned short eport,
 	   const char * iaddr, unsigned short iport,
 	   const char * rhost)
 {
-	return add_redirect_rule2(NULL, rhost, eport, iaddr, iport, proto, NULL, 0);
+	return add_redirect_rule2(NULL/* ifname */, rhost, eport, iaddr, iport, proto, NULL/* desc */, 0/* timestamp */);
 }
 
 int
@@ -44,6 +52,10 @@ main(int argc, char ** argv)
 		return -1;
 	}
 	openlog("testnftnlrdr", LOG_PERROR|LOG_CONS, LOG_LOCAL0);
+	if (init_redirect() < 0) {
+		fprintf(stderr, "init_redirect() FAILED\n");
+		return -1;
+	}
 	eport = (unsigned short)atoi(argv[1]);
 	iaddr = argv[2];
 	iport = (unsigned short)atoi(argv[3]);
@@ -68,12 +80,12 @@ main(int argc, char ** argv)
 
 		desc[0] = '\0';
 		printf("test0\n");
-		if(get_redirect_rule_by_index(0, "", &p1,
-		                              addr, sizeof(addr), &p2,
+		if(get_redirect_rule_by_index(0/* index */, NULL/* ifname */, &p1/* eport */,
+		                              addr, sizeof(addr), &p2/* iport */,
 		                              &proto2, desc, sizeof(desc),
 		                              rhost, sizeof(rhost),
 		                              &timestamp,
-					      &packets, &bytes) < 0)
+		                              &packets, &bytes) < 0)
 		{
 			printf("rule not found\n");
 		}
@@ -81,6 +93,7 @@ main(int argc, char ** argv)
 		{
 			printf("redirected port %hu to %s:%hu proto %d   packets=%" PRIu64 " bytes=%" PRIu64 "\n",
 			       p1, addr, p2, proto2, packets, bytes);
+			printf("timestamp=%u desc=\"%s\"\n", timestamp, desc);
 		}
 		printf("test\n");
 	}
@@ -88,5 +101,6 @@ main(int argc, char ** argv)
 	print_redirect_rules(argv[1]);
 	printf("deleting\n");
 	delete_redirect_and_filter_rules(eport, IPPROTO_TCP);
+	shutdown_redirect();
 	return 0;
 }

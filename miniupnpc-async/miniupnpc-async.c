@@ -399,8 +399,8 @@ static int upnpc_send_request(upnpc_device_t * p)
 	ssize_t n;
 	static const char reqfmt[] = "GET %s HTTP/1.1\r\n"
 		"Host: %s:%hu\r\n"
-		"Connection: Close\r\n"
-		"User-Agent: MiniUPnPc-async\r\n"
+		"Connection: close\r\n"
+		"User-Agent: OS/version UPnP/1.1 MiniUPnPc-async/2.2\r\n"
 		"\r\n";
 
 	/* retrieve "our" IP address used to connect to the UPnP device */
@@ -689,13 +689,12 @@ static int upnpc_build_soap_request(upnpc_device_t * p, const char * url,
 	const char fmt_http[] =
 		"POST %s HTTP/1.1\r\n"
 		"Host: %s%s\r\n"
-		"User-Agent: MiniUPnPc-async\r\n"
+		"User-Agent: OS/version UPnP/1.1 MiniUPnPc-async/2.2\r\n"
 		"Content-Length: %d\r\n"
-		"Content-Type: text/xml\r\n"
+		"Content-Type: text/xml charset=\"utf-8\"\r\n"
 		"SOAPAction: \"%s#%s\"\r\n"
-		"Connection: Close\r\n"
+		"Connection: close\r\n"
 		"Cache-Control: no-cache\r\n"	/* ??? */
-		"Pragma: no-cache\r\n"
 		"\r\n"
 		"%s";
 	char hostname[MAXHOSTNAMELEN+1];

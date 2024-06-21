@@ -1,13 +1,13 @@
-/* $Id: config.h,v 1.10 2018/02/23 13:58:14 nanard Exp $ */
+/* $Id: config.h,v 1.13 2022/10/22 18:52:25 nanard Exp $ */
 /*  MiniUPnP project
- * http://miniupnp.free.fr/ or http://miniupnp.tuxfamily.org/
- * (c) 2006-2018 Thomas Bernard
+ * http://miniupnp.free.fr/ or https://miniupnp.tuxfamily.org/
+ * (c) 2006-2020 Thomas Bernard
  * This software is subject to the conditions detailed
  * in the LICENCE file provided within the distribution */
 #ifndef CONFIG_H_INCLUDED
 #define CONFIG_H_INCLUDED
 
-#define MINISSDPD_VERSION "1.5"
+#define MINISSDPD_VERSION "1.6.0"
 
 /* use BSD daemon() ? */
 #define USE_DAEMON
@@ -29,5 +29,14 @@
  * As miniSSDPd needs to receive SSDP packets both multicasted
  * and unicasted, we cannot bind to 239.255.255.250 neither */
 /*#define SSDP_LISTEN_ON_SPECIFIC_ADDR*/
+
+/* When NO_BACKGROUND_NO_PIDFILE is defined, minissdpd does not go to
+ * background and does not create any pidfile */
+/*#define NO_BACKGROUND_NO_PIDFILE*/
+
+/* define HAVE_IP_MREQN to use struct ip_mreqn instead of struct ip_mreq
+ * for setsockopt(IP_MULTICAST_IF). Available with Linux 2.4+,
+ * FreeBSD, etc. */
+#define HAVE_IP_MREQN
 
 #endif

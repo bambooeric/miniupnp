@@ -1,7 +1,7 @@
-/* $Id: minissdpd.c,v 1.53 2016/03/01 18:06:46 nanard Exp $ */
+/* $Id: minissdpd.c,v 1.61 2021/11/04 23:27:28 nanard Exp $ */
 /* vim: tabstop=4 shiftwidth=4 noexpandtab
  * MiniUPnP project
- * (c) 2007-2018 Thomas Bernard
+ * (c) 2007-2024 Thomas Bernard
  * website : http://miniupnp.free.fr/ or https://miniupnp.tuxfamily.org/
  * This software is subject to the conditions detailed
  * in the LICENCE file provided within the distribution */
@@ -193,7 +193,7 @@ parselanaddr(struct lan_addr_s * lan_addr, const char * str)
 	if(lan_addr->ifname[0] != '\0') {
 		lan_addr->index = if_nametoindex(lan_addr->ifname);
 		if(lan_addr->index == 0)
-			fprintf(stderr, "Cannot get index for network interface %s",
+			fprintf(stderr, "Cannot get index for network interface %s\n",
 			        lan_addr->ifname);
 	} else {
 		fprintf(stderr,
@@ -472,7 +472,7 @@ SendSSDPMSEARCHResponse(int s, const struct sockaddr * sockname,
 	 *
 	 * have a look at the document "UPnP Device Architecture v1.1 */
 	l = snprintf(buf, sizeof(buf), "HTTP/1.1 200 OK\r\n"
-		"CACHE-CONTROL: max-age=120\r\n"
+		"CACHE-CONTROL: max-age=1800\r\n"
 		/*"DATE: ...\r\n"*/
 		"ST: %.*s\r\n"
 		"USN: %s\r\n"
@@ -573,7 +573,7 @@ processMSEARCH(int s, const char * st, size_t st_len,
 		    serv;
 		    serv = serv->entries.le_next) {
 			if(0 == strncmp(serv->st, st, l)) {
-				syslog(LOG_DEBUG, "Found matching service : %s %s", serv->st, serv->location);
+				syslog(LOG_DEBUG, "Found matching service : %s %s (v %d)", serv->st, serv->location, st_ver);
 				SendSSDPMSEARCHResponse(s, addr,
 				                        st, st_len, serv->usn,
 				                        serv->server, serv->location);
@@ -1215,7 +1215,7 @@ static void ssdpDiscover(int s, int ipv6, const char * search)
 		n = sendto_or_schedule(s, bufr, n, 0, (const struct sockaddr *)&sockudp_w,
 		                       ipv6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in));
 		if (n < 0) {
-			syslog(LOG_ERR, "%s: sendto: %m", __func__);
+			syslog(LOG_ERR, "%s: sendto(s=%d, ipv6=%d): %m", __func__, s, ipv6);
 		}
 	}
 }
@@ -1224,7 +1224,9 @@ static void ssdpDiscover(int s, int ipv6, const char * search)
 int main(int argc, char * * argv)
 {
 	int ret = 0;
+#ifndef NO_BACKGROUND_NO_PIDFILE
 	int pid;
+#endif
 	struct sigaction sa;
 	char buf[1500];
 	ssize_t n;
@@ -1245,7 +1247,9 @@ int main(int argc, char * * argv)
 	struct lan_addr_s * lan_addr;
 	int i;
 	const char * sockpath = "/var/run/minissdpd.sock";
+#ifndef NO_BACKGROUND_NO_PIDFILE
 	const char * pidfilename = "/var/run/minissdpd.pid";
+#endif
 	int debug_flag = 0;
 #ifdef ENABLE_IPV6
 	int ipv6 = 0;
@@ -1259,46 +1263,64 @@ int main(int argc, char * * argv)
 #endif	/* ENABLE_IPV6 */
 	unsigned char ttl = 2;	/* UDA says it should default to 2 */
 	const char * searched_device = NULL;	/* if not NULL, search/filter a specific device type */
+	int opt;
 
 	LIST_INIT(&reqlisthead);
 	LIST_INIT(&servicelisthead);
 	LIST_INIT(&lan_addrs);
 	/* process command line */
-	for(i=1; i<argc; i++)
-	{
- 		if(0==strcmp(argv[i], "-d"))
-			debug_flag = 1;
+#define OPTSTRING "d6i:s:p:t:f:"
+	while ((opt = getopt(argc, argv, "di:s:t:f:"
 #ifdef ENABLE_IPV6
-		else if(0==strcmp(argv[i], "-6"))
+	                                 "6"
+#endif
+#ifndef NO_BACKGROUND_NO_PIDFILE
+	                                 "p:"
+#endif
+
+	                     )) != -1)
+	{
+		switch(opt)
+		{
+		case 'd':
+			debug_flag = 1;
+			break;
+#ifdef ENABLE_IPV6
+		case '6':
 			ipv6 = 1;
+			break;
 #endif	/* ENABLE_IPV6 */
-		else {
-			if((i + 1) >= argc) {
-				fprintf(stderr, "option %s needs an argument.\n", argv[i]);
+		case 'i':
+			lan_addr = malloc(sizeof(struct lan_addr_s));
+			if(lan_addr == NULL) {
+				fprintf(stderr, "malloc(%d) FAILED\n", (int)sizeof(struct lan_addr_s));
 				break;
 			}
-			if(0==strcmp(argv[i], "-i")) {
-				lan_addr = malloc(sizeof(struct lan_addr_s));
-				if(lan_addr == NULL) {
-					fprintf(stderr, "malloc(%d) FAILED\n", (int)sizeof(struct lan_addr_s));
-					break;
-				}
-				if(parselanaddr(lan_addr, argv[++i]) != 0) {
-					fprintf(stderr, "can't parse \"%s\" as a valid address or interface name\n", argv[i]);
-					free(lan_addr);
-				} else {
-					LIST_INSERT_HEAD(&lan_addrs, lan_addr, list);
-				}
-			} else if(0==strcmp(argv[i], "-s"))
-				sockpath = argv[++i];
-			else if(0==strcmp(argv[i], "-p"))
-				pidfilename = argv[++i];
-			else if(0==strcmp(argv[i], "-t"))
-				ttl = (unsigned char)atoi(argv[++i]);
-			else if(0==strcmp(argv[i], "-f"))
-				searched_device = argv[++i];
-			else
-				fprintf(stderr, "unknown commandline option %s.\n", argv[i]);
+			if(parselanaddr(lan_addr, optarg) != 0) {
+				fprintf(stderr, "can't parse \"%s\" as a valid "
+#ifndef ENABLE_IPV6
+				        "address or "
+#endif
+				        "interface name\n", optarg);
+				free(lan_addr);
+			} else {
+				LIST_INSERT_HEAD(&lan_addrs, lan_addr, list);
+			}
+			break;
+		case 's':
+			sockpath = optarg;
+			break;
+#ifndef NO_BACKGROUND_NO_PIDFILE
+		case 'p':
+			pidfilename = optarg;
+			break;
+#endif
+		case 't':
+			ttl = (unsigned char)atoi(optarg);
+			break;
+		case 'f':
+			searched_device = optarg;
+			break;
 		}
 	}
 	if(lan_addrs.lh_first == NULL)
@@ -1308,17 +1330,30 @@ int main(int argc, char * * argv)
 #ifdef ENABLE_IPV6
 		        "[-6] "
 #endif /* ENABLE_IPV6 */
-		        "[-s socket] [-p pidfile] [-t TTL] "
+		        "[-s socket] "
+#ifndef NO_BACKGROUND_NO_PIDFILE
+				"[-p pidfile] "
+#endif
+				"[-t TTL] "
 		        "[-f device] "
 		        "-i <interface> [-i <interface2>] ...\n",
 		        argv[0]);
 		fprintf(stderr,
-		        "\n  <interface> is either an IPv4 address with mask such as\n"
-		        "  192.168.1.42/255.255.255.0, or an interface name such as eth0.\n");
+		        "\n  <interface> is "
+#ifndef ENABLE_IPV6
+		        "either an IPv4 address with mask such as\n"
+		        "  192.168.1.42/255.255.255.0, or "
+#endif
+				"an interface name such as eth0.\n");
 		fprintf(stderr,
 		        "\n  By default, socket will be open as %s\n"
+#ifndef NO_BACKGROUND_NO_PIDFILE
 		        "  and pid written to file %s\n",
-		        sockpath, pidfilename);
+		        sockpath, pidfilename
+#else
+				,sockpath
+#endif
+				);
 		return 1;
 	}
 
@@ -1329,11 +1364,13 @@ int main(int argc, char * * argv)
 	if(!debug_flag) /* speed things up and ignore LOG_INFO and LOG_DEBUG */
 		setlogmask(LOG_UPTO(LOG_NOTICE));
 
+#ifndef NO_BACKGROUND_NO_PIDFILE
 	if(checkforrunning(pidfilename) < 0)
 	{
 		syslog(LOG_ERR, "MiniSSDPd is already running. EXITING");
 		return 1;
 	}
+#endif
 
 	upnp_bootid = (unsigned int)time(NULL);
 
@@ -1414,6 +1451,7 @@ int main(int argc, char * * argv)
 	}
 #endif
 
+#ifndef NO_BACKGROUND_NO_PIDFILE
 	/* daemonize or in any case get pid ! */
 	if(debug_flag)
 		pid = getpid();
@@ -1428,10 +1466,33 @@ int main(int argc, char * * argv)
 	}
 
 	writepidfile(pidfilename, pid);
+#endif
 
 	/* send M-SEARCH ssdp:all Requests */
-	if(s_ssdp >= 0)
-		ssdpDiscover(s_ssdp, 0, searched_device);
+	if(s_ssdp >= 0) {
+		for(lan_addr = lan_addrs.lh_first; lan_addr != NULL; lan_addr = lan_addr->list.le_next) {
+#ifndef HAVE_IP_MREQN
+			struct in_addr mc_if;
+
+			mc_if.s_addr = lan_addr->addr.s_addr;	/*inet_addr(addr);*/
+#else
+			struct ip_mreqn mc_if;
+
+			mc_if.imr_address.s_addr = lan_addr->addr.s_addr;	/*inet_addr(addr);*/
+#ifdef ENABLE_IPV6
+			mc_if.imr_ifindex = lan_addr->index;
+#else	/* ENABLE_IPV6 */
+			mc_if.imr_ifindex = if_nametoindex(lan_addr->ifname);
+#endif	/* ENABLE_IPV6 */
+#endif	/* HAVE_IP_MREQN */
+			if(setsockopt(s_ssdp, IPPROTO_IP, IP_MULTICAST_IF, &mc_if, sizeof(mc_if)) < 0) {
+				syslog(LOG_WARNING, "setsockopt(IP_MULTICAST_IF): %m");
+			}
+			ssdpDiscover(s_ssdp, 0, searched_device);
+			/* XXX if ssdpDiscover() doesn't send the SSDP packet at once,
+			 * we should wait here */
+		}
+	}
 	if(s_ssdp6 >= 0)
 		ssdpDiscover(s_ssdp6, 1, searched_device);
 
@@ -1639,8 +1700,10 @@ quit:
 		free(serv->location);
 		free(serv);
 	}
+#ifndef NO_BACKGROUND_NO_PIDFILE
 	if(unlink(pidfilename) < 0)
 		syslog(LOG_ERR, "unlink(%s): %m", pidfilename);
+#endif
 	closelog();
 	return ret;
 }

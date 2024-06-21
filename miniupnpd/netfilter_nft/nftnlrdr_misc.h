@@ -1,8 +1,9 @@
-/*
- * MiniUPnP project
- * http://miniupnp.free.fr/ or http://miniupnp.tuxfamily.org/
+/* $Id: nftnlrdr_misc.h,v 1.11 2024/03/11 23:35:07 nanard Exp $ */
+/* MiniUPnP project
+ * http://miniupnp.free.fr/ or https://miniupnp.tuxfamily.org/
  * (c) 2015 Tomofumi Hayashi
  * (c) 2019 Paul Chambers
+ * (c) 2020-2024 Thomas Bernard
  *
  * This software is subject to the conditions detailed
  * in the LICENCE file provided within the distribution.
@@ -10,9 +11,13 @@
 #include <sys/queue.h>
 
 extern const char * nft_table;
+extern const char * nft_nat_table;
 extern const char * nft_prerouting_chain;
 extern const char * nft_postrouting_chain;
 extern const char * nft_forward_chain;
+extern int nft_nat_family;
+extern int nft_ipv4_family;
+extern int nft_ipv6_family;
 
 #define NFT_DESCR_SIZE 1024
 
@@ -28,9 +33,10 @@ enum rule_reg_type {
 	RULE_REG_IP6_SD_ADDR, /* source & dest */
 	RULE_REG_IP_PROTO,
 	RULE_REG_IP6_PROTO,
+	RULE_REG_TCP_SPORT,
 	RULE_REG_TCP_DPORT,
 	RULE_REG_TCP_SD_PORT, /* source & dest */
-	RULE_REG_IMM_VAL,
+	RULE_REG_IMM_VAL,     /* immediate */
 	RULE_REG_MAX,
 };
 
@@ -58,14 +64,14 @@ typedef struct rule_t {
 	uint32_t family;
 	uint32_t ingress_ifidx;
 	uint32_t egress_ifidx;
-	in_addr_t eaddr;
-	in_addr_t iaddr;
-	in_addr_t rhost;
-	struct in6_addr iaddr6;
-	struct in6_addr rhost6;
-	uint16_t eport;
-	uint16_t iport;
-	uint16_t rport;
+	in_addr_t saddr;
+	struct in6_addr saddr6;
+	uint16_t sport;
+	in_addr_t daddr;
+	struct in6_addr daddr6;
+	uint16_t dport;
+	in_addr_t nat_addr;
+	uint16_t nat_port;
 	uint8_t proto;
 	enum rule_reg_type reg1_type;
 	enum rule_reg_type reg2_type;
@@ -75,7 +81,6 @@ typedef struct rule_t {
 	uint64_t bytes;
 	char * desc;
 	uint32_t desc_len;
-	int index;
 } rule_t;
 
 LIST_HEAD(rule_list, rule_t);
@@ -135,10 +140,10 @@ rule_set_filter_common(struct nftnl_rule *r, uint8_t family, const char * ifname
 		uint8_t proto, unsigned short eport, unsigned short iport, 
 		unsigned short rport, const char *descr, const char *handle);
 struct nftnl_rule *rule_del_handle(rule_t *r);
-void refresh_nft_cache_filter(void);
-void refresh_nft_cache_redirect(void);
-void refresh_nft_cache_peer(void);
-void refresh_nft_cache(struct rule_list *head, const char *table, const char *chain, uint32_t family);
+int refresh_nft_cache_filter(void);
+int refresh_nft_cache_redirect(void);
+int refresh_nft_cache_peer(void);
+int refresh_nft_cache(struct rule_list *head, const char *table, const char *chain, uint32_t family, enum rule_type type);
 
 int
 table_op(enum nf_tables_msg_types op, uint16_t family, const char * name);
